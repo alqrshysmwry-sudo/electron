@@ -133,7 +133,7 @@ index a01f0d96ef33ce9460a851b072b7ceed5227dee3..f7e39b28cc0ba2251123925c01083a79
  
      // JavaScript from chrome and chrome-untrusted pages. The resource URLs are
 diff --git a/content/browser/code_cache/generated_code_cache_browsertest.cc b/content/browser/code_cache/generated_code_cache_browsertest.cc
-index 28556e56f2fd591c46ce6f48d39eb907876a499d..f5737ba60fb9e182459066ffa62c7c589f379954 100644
+index 659501d6a0ab4573ede8e91050bef88710e401d7..92cb39b7140fb815b1c56aca3be0db032c5699eb 100644
 --- a/content/browser/code_cache/generated_code_cache_browsertest.cc
 +++ b/content/browser/code_cache/generated_code_cache_browsertest.cc
 @@ -16,17 +16,22 @@
@@ -159,7 +159,7 @@ index 28556e56f2fd591c46ce6f48d39eb907876a499d..f5737ba60fb9e182459066ffa62c7c58
  #include "net/base/features.h"
  #include "net/dns/mock_host_resolver.h"
  #include "third_party/blink/public/common/features.h"
-@@ -37,6 +42,8 @@ namespace content {
+@@ -38,6 +43,8 @@ namespace content {
  
  namespace {
  
@@ -168,7 +168,7 @@ index 28556e56f2fd591c46ce6f48d39eb907876a499d..f5737ba60fb9e182459066ffa62c7c58
  bool SupportsSharedWorker() {
    return base::FeatureList::IsEnabled(blink::features::kSharedWorker);
  }
-@@ -1044,4 +1051,82 @@ IN_PROC_BROWSER_TEST_F(LocalCompileHintsBrowserTest, LocalCompileHints) {
+@@ -1063,4 +1070,82 @@ IN_PROC_BROWSER_TEST_F(LocalCompileHintsBrowserTest, LocalCompileHints) {
    }
  }
  
@@ -252,10 +252,10 @@ index 28556e56f2fd591c46ce6f48d39eb907876a499d..f5737ba60fb9e182459066ffa62c7c58
 +
  }  // namespace content
 diff --git a/content/browser/renderer_host/code_cache_host_impl.cc b/content/browser/renderer_host/code_cache_host_impl.cc
-index 7b4408f3480bd062ab9221f524633c177a212790..8d283d84b0817a937845b221bb13c6ed12bfade6 100644
+index 863c06383209bde7945bcce487161a64408bfcb0..1081019108eb3c0113aa34a2e1751e2f65fa8a1c 100644
 --- a/content/browser/renderer_host/code_cache_host_impl.cc
 +++ b/content/browser/renderer_host/code_cache_host_impl.cc
-@@ -7,6 +7,7 @@
+@@ -8,6 +8,7 @@
  #include <string_view>
  #include <utility>
  
@@ -263,7 +263,7 @@ index 7b4408f3480bd062ab9221f524633c177a212790..8d283d84b0817a937845b221bb13c6ed
  #include "base/feature_list.h"
  #include "base/functional/bind.h"
  #include "base/functional/callback_helpers.h"
-@@ -36,6 +37,7 @@
+@@ -38,6 +39,7 @@
  #include "third_party/blink/public/mojom/loader/code_cache.mojom-data-view.h"
  #include "url/gurl.h"
  #include "url/origin.h"
@@ -271,81 +271,101 @@ index 7b4408f3480bd062ab9221f524633c177a212790..8d283d84b0817a937845b221bb13c6ed
  
  using blink::mojom::CacheStorageError;
  
-@@ -55,6 +57,11 @@ GeneratedCodeCache::CodeCacheType MojoCacheTypeToCodeCacheType(
+@@ -110,142 +112,161 @@ std::optional<std::string> GetContextKeyForPersistentCacheCollection(
    }
- }
  
-+bool ProcessLockURLIsCodeCacheScheme(const ProcessLock& process_lock) {
-+  return base::Contains(url::GetCodeCacheSchemes(),
-+                        process_lock.GetProcessLockURL().scheme());
-+}
-+
- bool CheckSecurityForAccessingCodeCacheData(
-     const GURL& resource_url,
-     int render_process_id,
-@@ -65,39 +72,56 @@ bool CheckSecurityForAccessingCodeCacheData(
+   return context_key;
+-}
+-
+-bool CheckSecurityForAccessingCodeCacheData(
+-    const GURL& resource_url,
+-    int render_process_id,
+-    CodeCacheHostImpl::Operation operation) {
+-  ProcessLock process_lock =
+-      ChildProcessSecurityPolicyImpl::GetInstance()->GetProcessLock(
+-          render_process_id);
++  bool ProcessLockURLIsCodeCacheScheme(const ProcessLock& process_lock) {
++    return base::Contains(url::GetCodeCacheSchemes(),
++                          process_lock.GetProcessLockURL().scheme());
++  }
  
-   // Code caching is only allowed for http(s) and chrome/chrome-untrusted
-   // scripts. Furthermore, there is no way for http(s) pages to load chrome or
-+  // Code caching is only allowed for scripts from:
-+  // 1. http: and https: schemes.
-+  // 2. chrome: and chrome-untrusted: schemes.
-+  // 3. Schemes registered by content/ embedder via url::AddCodeCacheScheme.
-+  //
-+  // Furthermore, we know there are no way for http(s) pages to load chrome or
-   // chrome-untrusted scripts, so any http(s) page attempting to store data
-   // about a chrome or chrome-untrusted script would be an indication of
-   // suspicious activity.
+-  // Code caching is only allowed for http(s) and chrome/chrome-untrusted
+-  // scripts. Furthermore, there is no way for http(s) pages to load chrome or
+-  // chrome-untrusted scripts, so any http(s) page attempting to store data
+-  // about a chrome or chrome-untrusted script would be an indication of
+-  // suspicious activity.
 -  if (resource_url.SchemeIs(content::kChromeUIScheme) ||
 -      resource_url.SchemeIs(content::kChromeUIUntrustedScheme)) {
 -    if (!process_lock.IsLockedToSite()) {
 -      // We can't tell for certain whether this renderer is doing something
 -      // malicious, but we don't trust it enough to store data.
--      return false;
--    }
-+  if (resource_url.SchemeIsHTTPOrHTTPS()) {
-     if (process_lock.MatchesScheme(url::kHttpScheme) ||
-         process_lock.MatchesScheme(url::kHttpsScheme)) {
--      if (operation == CodeCacheHostImpl::Operation::kWrite) {
-+      return true;
-+    }
-+    // Pages in custom schemes like isolated-app: are allowed to load http(s)
-+    // resources.
-+    if (ProcessLockURLIsCodeCacheScheme(process_lock)) {
-+      return true;
-+    }
-+    // It is possible for WebUI pages to include open-web content, but such
-+    // usage is rare and we've decided that reasoning about security is easier
-+    // if the WebUI code cache includes only WebUI scripts.
-+    return false;
-+  }
++  bool CheckSecurityForAccessingCodeCacheData(
++      const GURL& resource_url, int render_process_id,
++      CodeCacheHostImpl::Operation operation) {
++    ProcessLock process_lock =
++        ChildProcessSecurityPolicyImpl::GetInstance()->GetProcessLock(
++            render_process_id);
 +
-+  if (resource_url.SchemeIs(content::kChromeUIScheme) ||
-+      resource_url.SchemeIs(content::kChromeUIUntrustedScheme)) {
-+    if (process_lock.MatchesScheme(content::kChromeUIScheme) ||
-+        process_lock.MatchesScheme(content::kChromeUIUntrustedScheme)) {
-+      return true;
-+     }
-+    if (operation == CodeCacheHostImpl::Operation::kWrite) {
++    // Code caching is only allowed for http(s) and chrome/chrome-untrusted
++    // scripts. Furthermore, there is no way for http(s) pages to load chrome or
++    // Code caching is only allowed for scripts from:
++    // 1. http: and https: schemes.
++    // 2. chrome: and chrome-untrusted: schemes.
++    // 3. Schemes registered by content/ embedder via url::AddCodeCacheScheme.
++    //
++    // Furthermore, we know there are no way for http(s) pages to load chrome or
++    // chrome-untrusted scripts, so any http(s) page attempting to store data
++    // about a chrome or chrome-untrusted script would be an indication of
++    // suspicious activity.
++    if (resource_url.SchemeIsHTTPOrHTTPS()) {
 +      if (process_lock.MatchesScheme(url::kHttpScheme) ||
 +          process_lock.MatchesScheme(url::kHttpsScheme)) {
-         mojo::ReportBadMessage("HTTP(S) pages cannot cache WebUI code");
-       }
-+      if (ProcessLockURLIsCodeCacheScheme(process_lock)) {
-+        mojo::ReportBadMessage(
-+            "Page whose scheme are allowed by content/ embedders cannot cache "
-+            "WebUI code. Did the embedder misconfigured content/?");
++        return true;
 +      }
++      // Pages in custom schemes like isolated-app: are allowed to load http(s)
++      // resources.
++      if (ProcessLockURLIsCodeCacheScheme(process_lock)) {
++        return true;
++      }
++      // It is possible for WebUI pages to include open-web content, but such
++      // usage is rare and we've decided that reasoning about security is easier
++      // if the WebUI code cache includes only WebUI scripts.
        return false;
      }
-     // Other schemes which might successfully load chrome or chrome-untrusted
-     // scripts, such as the PDF viewer, are unsupported but not considered
+-    if (process_lock.MatchesScheme(url::kHttpScheme) ||
+-        process_lock.MatchesScheme(url::kHttpsScheme)) {
++
++    if (resource_url.SchemeIs(content::kChromeUIScheme) ||
++        resource_url.SchemeIs(content::kChromeUIUntrustedScheme)) {
++      if (process_lock.MatchesScheme(content::kChromeUIScheme) ||
++          process_lock.MatchesScheme(content::kChromeUIUntrustedScheme)) {
++        return true;
++      }
+       if (operation == CodeCacheHostImpl::Operation::kWrite) {
+-        mojo::ReportBadMessage("HTTP(S) pages cannot cache WebUI code");
++        if (process_lock.MatchesScheme(url::kHttpScheme) ||
++            process_lock.MatchesScheme(url::kHttpsScheme)) {
++          mojo::ReportBadMessage("HTTP(S) pages cannot cache WebUI code");
++        }
++        if (ProcessLockURLIsCodeCacheScheme(process_lock)) {
++          mojo::ReportBadMessage(
++              "Page whose scheme are allowed by content/ embedders cannot "
++              "cache "
++              "WebUI code. Did the embedder misconfigured content/?");
++        }
++        return false;
+       }
++      // Other schemes which might successfully load chrome or chrome-untrusted
++      // scripts, such as the PDF viewer, are unsupported but not considered
++      // dangerous.  Similarly, the process might not be locked to a site.
+       return false;
+     }
+-    // Other schemes which might successfully load chrome or chrome-untrusted
+-    // scripts, such as the PDF viewer, are unsupported but not considered
 -    // dangerous.
 -    return process_lock.MatchesScheme(content::kChromeUIScheme) ||
 -           process_lock.MatchesScheme(content::kChromeUIUntrustedScheme);
-+    // dangerous.  Similarly, the process might not be locked to a site.
-+    return false;
-   }
+-  }
 -  if (resource_url.SchemeIsHTTPOrHTTPS() ||
 -      blink::CommonSchemeRegistry::IsExtensionScheme(resource_url.scheme())) {
 -    if (process_lock.MatchesScheme(content::kChromeUIScheme) ||
@@ -354,14 +374,222 @@ index 7b4408f3480bd062ab9221f524633c177a212790..8d283d84b0817a937845b221bb13c6ed
 -      // usage is rare and we've decided that reasoning about security is easier
 -      // if the WebUI code cache includes only WebUI scripts.
 -      return false;
--    }
++    if (base::Contains(url::GetCodeCacheSchemes(), resource_url.scheme())) {
++      return ProcessLockURLIsCodeCacheScheme(process_lock);
+     }
 -    return true;
-+  if (base::Contains(url::GetCodeCacheSchemes(), resource_url.scheme())) {
-+    return ProcessLockURLIsCodeCacheScheme(process_lock);
+-  }
+ 
+-  if (operation == CodeCacheHostImpl::Operation::kWrite) {
+-    mojo::ReportBadMessage("Invalid URL scheme for code cache.");
++    if (operation == CodeCacheHostImpl::Operation::kWrite) {
++      mojo::ReportBadMessage("Invalid URL scheme for code cache.");
++    }
++    return false;
+   }
+-  return false;
+-}
+ 
+-void DidGenerateCacheableMetadataInCacheStorageOnUI(
+-    const GURL& url,
+-    base::Time expected_response_time,
+-    mojo_base::BigBuffer data,
+-    const std::string& cache_storage_cache_name,
+-    int render_process_id,
+-    const blink::StorageKey& code_cache_storage_key,
+-    storage::mojom::CacheStorageControl* cache_storage_control_for_testing,
+-    mojo::ReportBadMessageCallback bad_message_callback) {
+-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+-  auto* render_process_host = RenderProcessHost::FromID(render_process_id);
+-  if (!render_process_host)
+-    return;
++  void DidGenerateCacheableMetadataInCacheStorageOnUI(
++      const GURL& url, base::Time expected_response_time,
++      mojo_base::BigBuffer data, const std::string& cache_storage_cache_name,
++      int render_process_id, const blink::StorageKey& code_cache_storage_key,
++      storage::mojom::CacheStorageControl* cache_storage_control_for_testing,
++      mojo::ReportBadMessageCallback bad_message_callback) {
++    DCHECK_CURRENTLY_ON(BrowserThread::UI);
++    auto* render_process_host = RenderProcessHost::FromID(render_process_id);
++    if (!render_process_host) {
++      return;
++    }
+ 
+-  int64_t trace_id = blink::cache_storage::CreateTraceId();
+-  TRACE_EVENT_WITH_FLOW1(
+-      "CacheStorage",
+-      "CodeCacheHostImpl::DidGenerateCacheableMetadataInCacheStorage",
+-      TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT, "url", url.spec());
+-
+-  mojo::Remote<blink::mojom::CacheStorage> remote;
+-  network::CrossOriginEmbedderPolicy cross_origin_embedder_policy;
+-  network::DocumentIsolationPolicy document_isolation_policy;
+-
+-  storage::mojom::CacheStorageControl* cache_storage_control =
+-      cache_storage_control_for_testing
+-          ? cache_storage_control_for_testing
+-          : render_process_host->GetStoragePartition()
+-                ->GetCacheStorageControl();
+-
+-  cache_storage_control->AddReceiver(
+-      cross_origin_embedder_policy, mojo::NullRemote(),
+-      document_isolation_policy, mojo::NullRemote(),
+-      storage::BucketLocator::ForDefaultBucket(code_cache_storage_key),
+-      storage::mojom::CacheStorageOwner::kCacheAPI,
+-      remote.BindNewPipeAndPassReceiver());
+-
+-  // Call the remote pointer directly so we can pass the remote to the callback
+-  // itself to preserve its lifetime.
+-  auto* raw_remote = remote.get();
+-  raw_remote->Open(
+-      base::UTF8ToUTF16(cache_storage_cache_name), trace_id,
+-      base::BindOnce(
+-          [](const GURL& url, base::Time expected_response_time,
+-             mojo_base::BigBuffer data, int64_t trace_id,
+-             mojo::Remote<blink::mojom::CacheStorage> preserve_remote_lifetime,
+-             blink::mojom::CacheStorage::OpenResult result) {
+-            if (!result.has_value()) {
+-              // Silently ignore errors.
+-              return;
+-            }
+-
+-            mojo::AssociatedRemote<blink::mojom::CacheStorageCache> remote;
+-            remote.Bind(std::move(result.value()));
+-            remote->WriteSideData(
+-                url, expected_response_time, std::move(data), trace_id,
+-                base::BindOnce(
+-                    [](mojo::Remote<blink::mojom::CacheStorage>
+-                           preserve_remote_lifetime,
+-                       CacheStorageError error) {
+-                      // Silently ignore errors.
+-                    },
+-                    std::move(preserve_remote_lifetime)));
+-          },
+-          url, expected_response_time, std::move(data), trace_id,
+-          std::move(remote)));
+-}
++    int64_t trace_id = blink::cache_storage::CreateTraceId();
++    TRACE_EVENT_WITH_FLOW1(
++        "CacheStorage",
++        "CodeCacheHostImpl::DidGenerateCacheableMetadataInCacheStorage",
++        TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT, "url",
++        url.spec());
++
++    mojo::Remote<blink::mojom::CacheStorage> remote;
++    network::CrossOriginEmbedderPolicy cross_origin_embedder_policy;
++    network::DocumentIsolationPolicy document_isolation_policy;
++
++    storage::mojom::CacheStorageControl* cache_storage_control =
++        cache_storage_control_for_testing
++            ? cache_storage_control_for_testing
++            : render_process_host->GetStoragePartition()
++                  ->GetCacheStorageControl();
++
++    cache_storage_control->AddReceiver(
++        cross_origin_embedder_policy, mojo::NullRemote(),
++        document_isolation_policy, mojo::NullRemote(),
++        storage::BucketLocator::ForDefaultBucket(code_cache_storage_key),
++        storage::mojom::CacheStorageOwner::kCacheAPI,
++        remote.BindNewPipeAndPassReceiver());
++
++    // Call the remote pointer directly so we can pass the remote to the
++    // callback itself to preserve its lifetime.
++    auto* raw_remote = remote.get();
++    raw_remote->Open(
++        base::UTF8ToUTF16(cache_storage_cache_name), trace_id,
++        base::BindOnce(
++            [](const GURL& url, base::Time expected_response_time,
++               mojo_base::BigBuffer data, int64_t trace_id,
++               mojo::Remote<blink::mojom::CacheStorage>
++                   preserve_remote_lifetime,
++               blink::mojom::CacheStorage::OpenResult result) {
++              if (!result.has_value()) {
++                // Silently ignore errors.
++                return;
++              }
++
++              mojo::AssociatedRemote<blink::mojom::CacheStorageCache> remote;
++              remote.Bind(std::move(result.value()));
++              remote->WriteSideData(
++                  url, expected_response_time, std::move(data), trace_id,
++                  base::BindOnce(
++                      [](mojo::Remote<blink::mojom::CacheStorage>
++                             preserve_remote_lifetime,
++                         CacheStorageError error) {
++                        // Silently ignore errors.
++                      },
++                      std::move(preserve_remote_lifetime)));
++            },
++            url, expected_response_time, std::move(data), trace_id,
++            std::move(remote)));
++  }
+ 
+-void AddCodeCacheReceiver(
+-    mojo::UniqueReceiverSet<blink::mojom::CodeCacheHost>* receiver_set,
+-    scoped_refptr<GeneratedCodeCacheContext> context,
+-    int render_process_id,
+-    const net::NetworkIsolationKey& nik,
+-    const blink::StorageKey& storage_key,
+-    mojo::PendingReceiver<blink::mojom::CodeCacheHost> receiver,
+-    CodeCacheHostImpl::ReceiverSet::CodeCacheHostReceiverHandler handler) {
+-  auto host = std::make_unique<CodeCacheHostImpl>(render_process_id, context,
+-                                                  nik, storage_key);
+-  auto* raw_host = host.get();
+-  auto id = receiver_set->Add(std::move(host), std::move(receiver));
+-  if (handler)
+-    std::move(handler).Run(raw_host, id, *receiver_set);
+-}
++  void AddCodeCacheReceiver(
++      mojo::UniqueReceiverSet<blink::mojom::CodeCacheHost> * receiver_set,
++      scoped_refptr<GeneratedCodeCacheContext> context, int render_process_id,
++      const net::NetworkIsolationKey& nik, const blink::StorageKey& storage_key,
++      mojo::PendingReceiver<blink::mojom::CodeCacheHost> receiver,
++      CodeCacheHostImpl::ReceiverSet::CodeCacheHostReceiverHandler handler) {
++    auto host = std::make_unique<CodeCacheHostImpl>(render_process_id, context,
++                                                    nik, storage_key);
++    auto* raw_host = host.get();
++    auto id = receiver_set->Add(std::move(host), std::move(receiver));
++    if (handler) {
++      std::move(handler).Run(raw_host, id, *receiver_set);
++    }
++  }
+ 
+ }  // namespace
+ 
+@@ -446,8 +467,9 @@ void CodeCacheHostImpl::ClearCodeCacheEntry(
+     const GURL& url) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   GeneratedCodeCache* code_cache = GetCodeCache(cache_type);
+-  if (!code_cache)
++  if (!code_cache) {
+     return;
++  }
+ 
+   std::optional<GURL> secondary_key =
+       GetSecondaryKeyForCodeCache(url, render_process_id_, Operation::kRead);
+@@ -476,8 +498,9 @@ void CodeCacheHostImpl::DidGenerateCacheableMetadataInCacheStorage(
+ GeneratedCodeCache* CodeCacheHostImpl::GetCodeCache(
+     blink::mojom::CodeCacheType cache_type) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  if (!generated_code_cache_context_)
++  if (!generated_code_cache_context_) {
+     return nullptr;
++  }
+ 
+   ProcessLock process_lock =
+       ChildProcessSecurityPolicyImpl::GetInstance()->GetProcessLock(
+@@ -496,8 +519,9 @@ GeneratedCodeCache* CodeCacheHostImpl::GetCodeCache(
+     return nullptr;
    }
  
-   if (operation == CodeCacheHostImpl::Operation::kWrite) {
-@@ -530,6 +554,7 @@ std::optional<GURL> CodeCacheHostImpl::GetSecondaryKeyForCodeCache(
+-  if (cache_type == blink::mojom::CodeCacheType::kJavascript)
++  if (cache_type == blink::mojom::CodeCacheType::kJavascript) {
+     return generated_code_cache_context_->generated_js_code_cache();
++  }
+ 
+   DCHECK_EQ(blink::mojom::CodeCacheType::kWebAssembly, cache_type);
+   return generated_code_cache_context_->generated_wasm_code_cache();
+@@ -589,6 +613,7 @@ std::optional<GURL> CodeCacheHostImpl::GetSecondaryKeyForCodeCache(
        process_lock.MatchesScheme(url::kHttpsScheme) ||
        process_lock.MatchesScheme(content::kChromeUIScheme) ||
        process_lock.MatchesScheme(content::kChromeUIUntrustedScheme) ||
